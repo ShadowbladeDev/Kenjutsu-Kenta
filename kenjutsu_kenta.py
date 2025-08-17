@@ -1,234 +1,195 @@
-import random
+Kenjutsu Kenta 
 import time
-import json
 
-# Splash screen animation
-def splash_screen():
-    print("⚔️ Kenjutsu Kenta ⚔️")
-    for c in "A samurai adventure begins...":
-        print(c, end='', flush=True)
-        time.sleep(0.05)
-    print("\n")
+class StatusEffect:
+    def __init__(self):
+        self.stunned = 0
+        self.bleeding = 0
+        self.buff_timer = 0
+        self.buff_type = None
 
-# Player setup
-player = {
-    "name": "",
-    "class": "",
-    "health": 100,
-    "inventory": [],
-    "location": "dojo",
-    "quests": {"Find the Hidden Cave": False},
-    "position": [0, 0]  # x, y coordinates
-}
+class Ability:
+    def __init__(self, name, damage, cooldown, description, effect=None, duration=0, one_use=False):
+        self.name = name
+        self.damage = damage
+        self.cooldown = cooldown
+        self.remaining_cooldown = 0
+        self.description = description
+        self.effect = effect
+        self.duration = duration
+        self.one_use = one_use
+        self.used = False
 
-# Character classes
-classes = {
-    "Samurai": {"health": 120, "bonus": "defense"},
-    "Ninja": {"health": 90, "bonus": "speed"},
-    "Ronin": {"health": 100, "bonus": "attack"}
-}
+    def use(self, user, target):
+        if self.remaining_cooldown > 0:
+            print(f"{self.name} is on cooldown for {self.remaining_cooldown} more turns.")
+            return False
+        if self.one_use and self.used:
+            print(f"{self.name} can only be used once per round.")
+            return False
 
-# Terrain map
-terrain_map = {
-    (0, 0): "dojo",
-    (1, 0): "village",
-    (2, 1): "forest",
-    (3, 2): "cave"
-}
+        if self.effect == "stun":
+            target.status.stunned = self.duration
+            print(f"{target.name} is stunned for {self.duration} turns!")
+        elif self.effect == "bleed":
+            target.status.bleeding = self.duration
+            print(f"{target.name} is bleeding for {self.duration} turns!")
+        elif self.effect == "buff":
+            user.status.buff_timer = self.duration
+            user.status.buff_type = self.name
+            print(f"{user.name} is buffed by {self.name} for {self.duration} turns!")
+        elif self.effect == "regen":
+            user.status.buff_timer = self.duration
+            user.status.buff_type = "regen"
+            print(f"{user.name} will regenerate 50 HP every turn for {self.duration} turns!")
 
-# Locations and actions
-locations = {
-    "dojo": {"description": "You stand in the quiet dojo. Your master awaits.", "actions": ["train", "leave", "save"]},
-    "forest": {"description": "The forest is dense and mysterious. Danger lurks.", "actions": ["explore", "return"]},
-    "village": {"description": "The village is peaceful. You hear whispers of bandits.", "actions": ["talk", "return"]},
-    "cave": {"description": "You found the hidden cave. A boss awaits!", "actions": ["fight_boss", "return"]}
-}
+        actual_damage = int(self.damage * (user.atk / (user.atk + target.df)))
+        target.hp = max(target.hp - actual_damage, 0)
+        print(f"{user.name} uses {self.name} on {target.name} for {actual_damage} damage!")
 
-# Game functions
-def choose_class():
-    print("Choose your class:")
-    for c in classes:
-        print(f"- {c}: {classes[c]['bonus']} bonus")
-    choice = input("Class: ").title()
-    if choice in classes:
-        player["class"] = choice
-        player["health"] = classes[choice]["health"]
-        print(f"You are now a {choice} with {player['health']} health.")
-    else:
-        print("Invalid class. Defaulting to Ronin.")
-        player["class"] = "Ronin"
+        self.remaining_cooldown = self.cooldown
+        if self.one_use:
+            self.used = True
+        return True
 
-def train():
-    print("You train with your master. Your skills improve.")
-    if "katana" not in player["inventory"]:
-        player["inventory"].append("katana")
-        print("You received a katana!")
+    def tick(self):
+        if self.remaining_cooldown > 0:
+            self.remaining_cooldown -= 1
 
-def explore():
-    print("You explore the forest...")
-    if not player["quests"]["Find the Hidden Cave"]:
-        print("You discover a hidden path to a cave!")
-        player["quests"]["Find the Hidden Cave"] = True
-        locations["forest"]["actions"].append("enter cave")
-    else:
-        encounter = random.choice(["bandit", "scroll", "nothing"])
-        if encounter == "bandit":
-            print("A bandit attacks!")
-            fight()
-        elif encounter == "scroll":
-            print("You found a magic scroll!")
-            player["inventory"].append("scroll")
+class Character:
+    def __init__(self, name, hp, atk, df, abilities):
+        self.name = name
+        self.max_hp = hp
+        self.hp = hp
+        self.atk = atk
+        self.df = df
+        self.abilities = abilities
+        self.status = StatusEffect()
+        self.hp_stack = 0
+
+    def is_alive(self):
+        return self.hp > 0
+
+    def tick_effects(self):
+        if self.status.stunned > 0:
+            self.status.stunned -= 1
+        if self.status.bleeding > 0:
+            bleed_damage = 150
+            self.hp = max(self.hp - bleed_damage, 0)
+            print(f"{self.name} takes {bleed_damage} bleed damage!")
+            self.status.bleeding -= 1
+        if self.status.buff_timer > 0:
+            if self.status.buff_type == "regen":
+                heal = 50
+                if self.hp < self.max_hp:
+                    self.hp = min(self.hp + heal, self.max_hp)
+                    print(f"{self.name} regenerates {heal} HP!")
+            self.status.buff_timer -= 1
+
+    def tick_cooldowns(self):
+        for ability in self.abilities:
+            ability.tick()
+
+    def show_status(self):
+        bar = "▓" * int((self.hp / self.max_hp) * 20)
+        print(f"{self.name} HP: [{bar:<20}] {self.hp}/{self.max_hp}")
+
+    def show_abilities(self):
+        for i, ab in enumerate(self.abilities):
+            status = f"(Cooldown: {ab.remaining_cooldown})" if ab.remaining_cooldown > 0 else "(Ready)"
+            print(f"{i+1}. {ab.name} {status} - {ab.description}")
+def define_characters():
+    tank_abilities = [
+        Ability("Shield Charge", 250, 3, "Stuns for 3s", effect="stun", duration=1),
+        Ability("Rocket Punch", 250, 4, "Knocks back"),
+        Ability("Rocket Throw", 500, 5, "Throws rocket"),
+        Ability("Rocket Barrage", 1250, 10, "Launches 5 rockets at 250 each")
+    ]
+    ninja_abilities = [
+        Ability("Stun Grenade / Smoke Bomb", 0, 2, "Stuns or disappears", effect="stun", duration=1),
+        Ability("Blade Slash", 250, 3, "Dual sword slash"),
+        Ability("Deep Cut", 150, 5, "Bleeds for 5s", effect="bleed", duration=5),
+        Ability("Void Slash", 2500, 10, "Massive void slash")
+    ]
+    voidling_abilities = [
+        Ability("Transcending", 0, 4, "Boosts all stats x10 for 5s", effect="buff", duration=5),
+        Ability("Void Dash", 250, 5, "Void blade dash"),
+        Ability("Dead Cold", 0, 10, "+1000 DF, +50 ATK for 10s", effect="buff", duration=10),
+        Ability("Ancestral Bond", 9999, 99, "One-tap blood strike", one_use=True)
+    ]
+    medic_abilities = [
+        Ability("Regeneration", 0, 2, "Regens 50 HP every turn for 5s", effect="regen", duration=5),
+        Ability("Med-Mist", -250, 4, "Heals 250 HP"),
+        Ability("Life Steal", -100, 5, "Steals 100 HP, stacks +1000 if full"),
+        Ability("Stink Bomb", 50, 10, "Deals 50 damage over 8s", effect="bleed", duration=8)
+    ]
+
+    return {
+        "1": Character("The Tank", 5000, 250, 500, tank_abilities),
+        "2": Character("Assassin/Ninja", 2500, 250, 500, ninja_abilities),
+        "3": Character("Voidling Warrior", 2000, 50, 10, voidling_abilities),
+        "4": Character("The Medic", 1500, 150, 100, medic_abilities)
+    }
+
+def choose_character(characters):
+    print("Choose your warrior:")
+    for key, char in characters.items():
+        print(f"{key}. {char.name}")
+    choice = input("Enter number: ")
+    return characters[choice]
+
+def battle(player, enemy):
+    turn = 1
+    while player.is_alive() and enemy.is_alive():
+        print(f"\n--- Turn {turn} ---")
+        player.show_status()
+        enemy.show_status()
+
+        player.tick_effects()
+        enemy.tick_effects()
+
+        if player.status.stunned == 0:
+            print("\nYour abilities:")
+            player.show_abilities()
+            move = int(input("Choose ability number: ")) - 1
+            player.abilities[move].use(player, enemy)
         else:
-            print("The forest is calm today.")
+            print(f"{player.name} is stunned and skips this turn!")
 
-def talk():
-    print("Villagers speak of a hidden cave in the forest.")
-
-def fight():
-    if "katana" in player["inventory"]:
-        print("You fight bravely and defeat the bandit!")
-    else:
-        print("You have no weapon! You lose 20 health.")
-        player["health"] -= 20
-
-def fight_boss():
-    print("You face the Shadow Ronin!")
-    if "katana" in player["inventory"]:
-        print("With your katana, you defeat the Shadow Ronin! Quest complete.")
-        player["quests"]["Find the Hidden Cave"] = "Completed"
-    else:
-        print("You are unarmed and fall in battle.")
-        player["health"] = 0
-
-def move(location):
-    if location in locations:
-        player["location"] = location
-        print(locations[location]["description"])
-    else:
-        print("You can't go there.")
-
-def save_game():
-    with open("savefile.json", "w") as f:
-        json.dump(player, f)
-    print("Game saved!")
-
-def load_game():
-    try:
-        with open("savefile.json", "r") as f:
-            data = json.load(f)
-            player.update(data)
-        print("Game loaded!")
-    except FileNotFoundError:
-        print("No save file found.")
-
-def use_scroll():
-    if "scroll" in player["inventory"]:
-        print("You use a magic scroll and restore 30 health!")
-        player["health"] = min(player["health"] + 30, classes[player["class"]]["health"])
-        player["inventory"].remove("scroll")
-    else:
-        print("You have no scrolls.")
-
-def move_3d():
-    print(f"Current position: {player['position']}")
-    direction = input("Move (north/south/east/west): ").lower()
-    x, y = player["position"]
-    if direction == "north" and y < 4:
-        y += 1
-    elif direction == "south" and y > 0:
-        y -= 1
-    elif direction == "east" and x < 4:
-        x += 1
-    elif direction == "west" and x > 0:
-        x -= 1
-    else:
-        print("You can't move that way.")
-        return
-    player["position"] = [x, y]
-    print(f"New position: {player['position']}")
-
-    # Terrain event
-    terrain = terrain_map.get((x, y), "wilderness")
-    print(f"You arrive at: {terrain}")
-    if terrain == "forest":
-        explore()
-    elif terrain == "village":
-        talk()
-    elif terrain == "cave":
-        if player["quests"]["Find the Hidden Cave"]:
-            fight_boss()
-        else:
-            print("The cave is sealed by magic.")
-    elif terrain == "dojo":
-        train()
-    else:
-        if random.random() < 0.3:
-            print("A rogue enemy patrol spots you!")
-            fight()
-
-def show_map():
-    x, y = player["position"]
-    print("\n🗺️ Map:")
-    for j in range(4, -1, -1):
-        row = ""
-        for i in range(5):
-            if [i, j] == [x, y]:
-                row += "🧍 "
-            elif (i, j) in terrain_map:
-                row += "🏯 "
+        if enemy.is_alive():
+            if enemy.status.stunned == 0:
+                for ab in enemy.abilities:
+                    if ab.remaining_cooldown == 0:
+                        ab.use(enemy, player)
+                        break
             else:
-                row += "⬜ "
-        print(row)
-    print("⬜ = empty space, 🧍 = you, 🏯 = location\n")
+                print(f"{enemy.name} is stunned and skips this turn!")
 
-def game_loop():
-    splash_screen()
-    choice = input("Load previous game? (yes/no): ").lower()
-    if choice == "yes":
-        load_game()
-    else:
-        player["name"] = input("Enter your samurai name: ")
-        choose_class()
+        player.tick_cooldowns()
+        enemy.tick_cooldowns()
+        turn += 1
+        time.sleep(1)
 
-    while player["health"] > 0:
-        loc = player["location"]
-        print(f"\nYou are at the {loc}.")
-        print("Available actions:", locations[loc]["actions"] + ["move_3d", "use_scroll", "show_map"])
-        action = input("What will you do? ").lower()
+    winner = player.name if player.is_alive() else enemy.name
+    print(f"\n{winner} wins
+def play_game():
+    while True:
+        characters = define_characters()
+        player = choose_character(characters)
+        enemy = characters["2"] if player.name != "Assassin/Ninja" else characters["1"]
 
-        if loc == "dojo":
-            if action == "train":
-                train()
-            elif action == "leave":
-                move("forest")
-            elif action == "save":
-                save_game()
-        elif loc == "forest":
-            if action == "explore":
-                explore()
-            elif action == "return":
-                move("dojo")
-            elif action == "enter cave" and player["quests"]["Find the Hidden Cave"]:
-                move("cave")
-        elif loc == "village":
-            if action == "talk":
-                talk()
-            elif action == "return":
-                move("dojo")
-        elif loc == "cave":
-            if action == "fight_boss":
-                fight_boss()
-            elif action == "return":
-                move("forest")
+        # Reset characters with fresh cooldowns
+        player = Character(player.name, player.max_hp, player.atk, player.df,
+                           [Ability(ab.name, ab.damage, ab.cooldown, ab.description, ab.effect, ab.duration, ab.one_use) for ab in player.abilities])
+        enemy = Character(enemy.name, enemy.max_hp, enemy.atk, enemy.df,
+                          [Ability(ab.name, ab.damage, ab.cooldown, ab.description, ab.effect, ab.duration, ab.one_use) for ab in enemy.abilities])
 
-        if action == "move_3d":
-            move_3d()
-        elif action == "use_scroll":
-            use_scroll()
-        elif action == "show_map":
-            show_map()
+        battle(player, enemy)
 
-    print("You have fallen in battle. Game over.")
+        again = input("\nDo you wish to play again? (yes/no): ").strip().lower()
+        if again != "yes":
+            print("Thanks for playing Kenjutsu Kenta!")
+            break
 
-# Start the game
-game_loop()
+# Start game
+play_game()
